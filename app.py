@@ -55,6 +55,10 @@ class Chirps(BaseHTTPRequestHandler):
             html.append(f'<input type="hidden" name="id" value={chirp.id}>')
             html.append('<input type="submit" value="Upvote">')
             html.append('</form>')
+            html.append('<form action="/downvote" method="post">')
+            html.append(f'<input type="hidden" name="id" value={chirp.id}>')
+            html.append('<input type="submit" value="Downvote">')
+            html.append('</form>')
             html.append('</li>')
         html.append('</ul>')
 
@@ -110,6 +114,31 @@ class Chirps(BaseHTTPRequestHandler):
         cur.execute('UPDATE chirps SET votes = ? WHERE id = ?', (chirp.votes + 1, chirp.id))
         conn.commit()
 
+    def POST_downvote(self):
+        length = int(self.headers['Content-Length'])
+        params = parse_qs(unquote_plus(self.rfile.read(length).decode('utf-8')))
+        chirp_id = params['id'][0]
+        downvoted = self.downvote(chirp_id)
+
+        self.send_response(303)
+        self.send_header('Location', '/index')
+        self.end_headers()
+        if downvoted:
+            self.send_push_request(chirp_id)
+
+    def downvote(self, chirp_id):
+        conn = sqlite3.connect(DATABASE)
+        conn.row_factory = lambda cursor, row: Chirp(*row)
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM chirps WHERE id = ?', (chirp_id,))
+        chirp = cur.fetchall()[0]
+        votes = chirp.votes
+        if votes == 0:
+            return False
+        cur.execute('UPDATE chirps SET votes = ? WHERE id = ?', (votes - 1, chirp.id))
+        conn.commit()
+        return True
+
     def send_push_request(self, chirp_id):
         service = HTTPSConnection('bellbird.joinhandshake-internal.com')
         service.request(
@@ -117,7 +146,6 @@ class Chirps(BaseHTTPRequestHandler):
                 "/push",
                 body=json.dumps({'chirp_id': chirp_id}))
         response = service.getresponse()
-        time.sleep(5)
         print(f'Response for chirp {chirp_id}: {response.status}')
 
 if __name__ == '__main__':
